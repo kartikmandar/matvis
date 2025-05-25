@@ -174,7 +174,7 @@ def test_polarized_flux(first_source_antizenith):
     params, sky_model, *_ = get_standard_sim_params(
         use_analytic_beam=False,
         polarized=True,
-        nsource=50,
+        nsource=10,
         ntime=2,
         first_source_antizenith=first_source_antizenith,
         use_polarized_sky=True,

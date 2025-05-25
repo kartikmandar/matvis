@@ -116,7 +116,7 @@ def get_standard_sim_params(
     ]
     if nsource > 1:  # Add random other sources
         ra = rng.uniform(low=0.0, high=360.0, size=nsource - 1)
-        dec = -30.72 + rng.uniform(size=nsource - 1)
+        dec = -30.72 + rng.uniform(size=nsource - 1) * 10.0
         flux = rng.uniform(size=nsource - 1) * 4
         sources.extend([ra[i], dec[i], flux[i], 0] for i in range(nsource - 1))
     sources = np.array(sources)
