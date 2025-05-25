@@ -32,6 +32,7 @@ def get_standard_sim_params(
     ntime=ntime,
     nsource=nsource,
     first_source_antizenith=False,
+    use_polarized_sky=False,
 ):
     """Create some standard random simulation parameters for use in tests."""
     hera = Telescope.from_known_telescopes("hera")
@@ -115,7 +116,7 @@ def get_standard_sim_params(
     ]
     if nsource > 1:  # Add random other sources
         ra = rng.uniform(low=0.0, high=360.0, size=nsource - 1)
-        dec = -30.72 + rng.uniform(size=nsource - 1) * 10.0
+        dec = -30.72 + rng.uniform(size=nsource - 1)
         flux = rng.uniform(size=nsource - 1) * 4
         sources.extend([ra[i], dec[i], flux[i], 0] for i in range(nsource - 1))
     sources = np.array(sources)
@@ -131,6 +132,11 @@ def get_standard_sim_params(
     # are calculated later.
     stokes = np.zeros((4, 1, ra_dec.shape[0]))
     stokes[0, 0] = sources[:, 2]
+
+    if use_polarized_sky:
+        stokes[1, 0] = sources[:, 2] * 0.2
+        stokes[2, 0] = sources[:, 2] * 0.3
+        stokes[3, 0] = sources[:, 2] * 0.4
     reference_frequency = np.full(len(ra_dec), freqs[0])
 
     # Set up sky model
