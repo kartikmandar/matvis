@@ -204,6 +204,7 @@ def test_coherency_calc(first_source_antizenith, use_horizon_sources):
         nsource=NPTSRC,
         ntime=NTIMES,
         first_source_antizenith=first_source_antizenith,
+        use_polarized_sky=True,
     )
 
     # Set up sky model for EW/NS horizon sources

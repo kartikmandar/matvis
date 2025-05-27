@@ -177,18 +177,14 @@ def test_polarized_flux(first_source_antizenith):
         nsource=10,
         ntime=2,
         first_source_antizenith=first_source_antizenith,
+        use_polarized_sky=True,
     )
 
-    stokes = sky_model.stokes.value
-    coherency_matrix = 0.5 * np.array(
-        [
-            [stokes[0] + stokes[1], stokes[2] + 1j * stokes[3]],
-            [stokes[2] - stokes[3], stokes[0] - stokes[1]],
-        ]
-    )
+    # calculate the frame coherency matrix
+    sky_model.calc_frame_coherency()
 
     coord_mgr = CoordinateRotationAstropy(
-        flux=coherency_matrix.T,
+        flux=sky_model.frame_coherency.T,
         times=params["times"],
         telescope_loc=params["telescope_loc"],
         skycoords=sky_model.skycoord,

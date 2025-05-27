@@ -130,8 +130,8 @@ class CoordinateRotation(ABC):
             # For polarized flux, rotate the frame coherency
             self.flux_above_horizon[:n] = self._rotate_frame_coherency(
                 coherency_matrix=flux[above_horizon],
-                ra=self.skycoords.ra.rad[above_horizon],
-                dec=self.skycoords.dec.rad[above_horizon],
+                ra=self.skycoords.ra.rad[slc][above_horizon],
+                dec=self.skycoords.dec.rad[slc][above_horizon],
                 alt=np.pi / 2 - za,
                 az=az,
                 time=self.times[t],
@@ -169,7 +169,7 @@ class CoordinateRotation(ABC):
         # size (2, 2, nsources), and coherency matrix is a matrix of size
         # (nsources, nfreq, 2, 2).
         coherency_matrix = self.xp.einsum(
-            "abn,nfbc,dcn->nfad", coherency_rotator, coherency_matrix, coherency_rotator
+            "ban,nfbc,cdn->nfad", coherency_rotator, coherency_matrix, coherency_rotator
         )
         return coherency_matrix
 
