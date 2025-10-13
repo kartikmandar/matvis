@@ -42,17 +42,17 @@ repos:
     - id: rst-backticks
 
 - repo: https://github.com/PyCQA/isort
-  rev: 6.1.0
+  rev: 7.0.0
   hooks:
   - id: isort
 
 - repo: https://github.com/asottile/pyupgrade
-  rev: v3.20.0
+  rev: v3.21.0
   hooks:
   - id: pyupgrade
     args: [--py39-plus]
 
 - repo: https://github.com/asottile/setup-cfg-fmt
-  rev: v2.8.0
+  rev: v3.1.0
   hooks:
   - id: setup-cfg-fmt
