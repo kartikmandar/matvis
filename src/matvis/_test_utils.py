@@ -5,13 +5,17 @@ from astropy import units as un
 from astropy.coordinates import EarthLocation, Latitude, Longitude
 from astropy.time import Time
 from astropy.units import Quantity
+from dataclasses import replace
 from pathlib import Path
 from pyradiosky import SkyModel
 from pyuvdata import UVBeam
-from pyuvsim import AnalyticBeam, simsetup
+from pyuvdata.analytic_beam import GaussianBeam
+from pyuvdata.beam_interface import BeamInterface
+from pyuvdata.telescopes import Telescope
+from pyuvsim import simsetup
 from pyuvsim.telescope import BeamList
 
-from matvis import DATA_PATH, conversions
+from matvis import DATA_PATH
 
 nfreq = 1
 ntime = 5  # 20
@@ -28,57 +32,54 @@ def get_standard_sim_params(
     ntime=ntime,
     nsource=nsource,
     first_source_antizenith=False,
+    use_polarized_sky=False,
 ):
     """Create some standard random simulation parameters for use in tests."""
-    hera_lat = -30.7215
-    hera_lon = 21.4283
-    hera_alt = 1073.0
+    hera = Telescope.from_known_telescopes("hera")
     obstime = Time("2018-08-31T04:02:30.11", format="isot", scale="utc")
 
-    # HERA location
-    location = EarthLocation.from_geodetic(lat=hera_lat, lon=hera_lon, height=hera_alt)
-
-    np.random.seed(1)
+    rng = np.random.default_rng(1)
 
     # Beam model
     if use_analytic_beam:
         n_freq = nfreq
-        beam = AnalyticBeam("gaussian", diameter=14.0)
+        beam = BeamInterface(
+            GaussianBeam(diameter=14.0), beam_type="efield" if polarized else "power"
+        )
     else:
         n_freq = min(nfreq, 2)
         # This is a peak-normalized e-field beam file at 100 and 101 MHz,
         # downsampled to roughly 4 square-degree resolution.
         beam = UVBeam()
         beam.read_beamfits(beam_file)
-        if not polarized:
-            uvsim_beam = beam.copy()
-            beam.efield_to_power(calc_cross_pols=False, inplace=True)
-            beam.select(polarizations=["xx"], inplace=True)
+        # Even though we sometimes want a power beam for matvis, we always need
+        # an efield beam for pyuvsim, so we create an efield beam here, and let matvis
+        # take care of conversion later.
+        beam = BeamInterface(beam, beam_type="efield")
 
         # Now, the beam we have on file doesn't actually properly wrap around in azimuth.
         # This is fine -- the uvbeam.interp() handles the interpolation well. However, when
         # comparing to the GPU interpolation, which first has to interpolate to a regular
         # grid that ends right at 2pi, it's better to compare like for like, so we
         # interpolate to such a grid here.
-        beam = beam.interp(
-            az_array=np.linspace(0, 2 * np.pi, 181),
-            za_array=np.linspace(0, np.pi / 2, 46),
-            az_za_grid=True,
-            new_object=True,
+        beam = beam.clone(
+            beam=beam.beam.interp(
+                az_array=np.linspace(0, 2 * np.pi, 181),
+                za_array=np.linspace(0, np.pi / 2, 46),
+                az_za_grid=True,
+                new_object=True,
+            )
         )
 
-    if polarized or use_analytic_beam:
-        uvsim_beams = BeamList([beam] * nants)
-    else:
-        uvsim_beams = BeamList([uvsim_beam] * nants)
+    # The UVSim beams must be efield all the time.
+    uvsim_beams = BeamList([beam])
 
-    # beams = [AnalyticBeam('uniform') for i in range(len(ants.keys()))]
-    beam_dict = {str(i): i for i in range(nants)}
+    beam_dict = {str(i): 0 for i in range(nants)}
 
     # Random antenna locations
-    x = np.random.random(nants) * 400.0  # Up to 400 metres
-    y = np.random.random(nants) * 400.0
-    z = np.random.random(nants) * 0.0
+    x = rng.uniform(size=nants) * 400.0  # Up to 400 metres
+    y = rng.uniform(size=nants) * 400.0
+    z = np.zeros(nants)
     ants = {i: (x[i], y[i], z[i]) for i in range(nants)}
 
     # Observing parameters in a UVData object
@@ -91,14 +92,18 @@ def get_standard_sim_params(
         Ntimes=ntime,
         array_layout=ants,
         polarization_array=np.array(["XX", "YY", "XY", "YX"]),
-        telescope_location=(hera_lat, hera_lon, hera_alt),
-        telescope_name="test_array",
+        telescope_location=(
+            float(hera.location.lat.deg),
+            float(hera.location.lon.deg),
+            float(hera.location.height.to_value("m")),
+        ),
+        telescope_name="HERA",
         phase_type="drift",
         vis_units="Jy",
         complete=True,
         write_files=False,
     )
-    lsts = np.unique(uvdata.lst_array)
+    times = Time(np.unique(uvdata.time_array), format="jd")
 
     # One fixed source plus random other sources
     sources = [
@@ -110,20 +115,15 @@ def get_standard_sim_params(
         ],  # Fix a single source near zenith
     ]
     if nsource > 1:  # Add random other sources
-        ra = np.random.uniform(low=0.0, high=360.0, size=nsource - 1)
-        dec = -30.72 + np.random.random(nsource - 1) * 10.0
-        flux = np.random.random(nsource - 1) * 4
+        ra = rng.uniform(low=0.0, high=360.0, size=nsource - 1)
+        dec = -30.72 + rng.uniform(size=nsource - 1) * 10.0
+        flux = rng.uniform(size=nsource - 1) * 4
         sources.extend([ra[i], dec[i], flux[i], 0] for i in range(nsource - 1))
     sources = np.array(sources)
 
     # Source locations and frequencies
     ra_dec = np.deg2rad(sources[:, :2])
     freqs = np.unique(uvdata.freq_array)
-
-    # Correct source locations so that matvis uses the right frame
-    ra_new, dec_new = conversions.equatorial_to_eci_coords(
-        ra_dec[:, 0], ra_dec[:, 1], obstime, location, unit="rad", frame="icrs"
-    )
 
     # Calculate source fluxes for matvis
     flux = ((freqs[:, np.newaxis] / freqs[0]) ** sources[:, 3].T * sources[:, 2].T).T
@@ -132,6 +132,11 @@ def get_standard_sim_params(
     # are calculated later.
     stokes = np.zeros((4, 1, ra_dec.shape[0]))
     stokes[0, 0] = sources[:, 2]
+
+    if use_polarized_sky:
+        stokes[1, 0] = sources[:, 2] * 0.2
+        stokes[2, 0] = sources[:, 2] * 0.3
+        stokes[3, 0] = sources[:, 2] * 0.4
     reference_frequency = np.full(len(ra_dec), freqs[0])
 
     # Set up sky model
@@ -150,16 +155,19 @@ def get_standard_sim_params(
     sky_model.at_frequencies(Quantity(freqs, "Hz"), inplace=True)
 
     return (
+        {
+            "ants": ants,
+            "fluxes": flux,
+            "ra": sky_model.ra.rad,
+            "dec": sky_model.dec.rad,
+            "freqs": freqs,
+            "times": times,
+            "beams": [beam],
+            "telescope_loc": uvdata.telescope.location,
+            "polarized": polarized,
+        },
         sky_model,
-        ants,
-        flux,
-        ra_new,
-        dec_new,
-        freqs,
-        lsts,
-        [beam],
         uvsim_beams,
         beam_dict,
-        hera_lat,
         uvdata,
     )
