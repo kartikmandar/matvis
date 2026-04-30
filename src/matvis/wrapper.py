@@ -41,6 +41,20 @@ def simulate_vis(
     source_buffer: float = 1.0,
     stokes: np.ndarray | None = None,
     raise_on_negative_flux: bool = True,
+    coord_method: Literal[
+        "CoordinateRotationAstropy",
+        "CoordinateRotationERFA",
+        "GPUCoordinateRotationERFA",
+    ] = "CoordinateRotationAstropy",
+    coord_method_params: dict | None = None,
+    matprod_method: Literal[
+        "MatMul",
+        "VectorLoop",
+        "CPUMatMul",
+        "GPUMatMul",
+        "CPUVectorLoop",
+        "GPUVectorLoop",
+    ] = "MatMul",
     **backend_kwargs,
 ):
     """
@@ -104,6 +118,24 @@ def simulate_vis(
         How to handle negative eigenvalues in the coherency matrix.
         If True (default), raise ValueError if any eigenvalue is negative.
         If False, use sign-split decomposition (two matprod passes, subtract).
+    coord_method
+        The method to use to transform coordinates from the equatorial to horizontal
+        frame. The default is to use Astropy coordinate transforms. A faster option,
+        which is accurate to within 6 mas, is to use "CoordinateTransformERFA" (or
+        its GPU version, if using GPU).
+    coord_method_params
+        Parameters particular to the coordinate rotation method of choice. For example,
+        for the CoordinateRotationERFA (and GPU version of the same) method, there
+        is the parameter ``update_bcrs_every``, which should be a time in seconds, for
+        which larger values speed up the computation.
+    matprod_method
+        The method to use for the final matrix multiplication. Default is 'MatMul',
+        which simply uses matrix multiplication over the two full matrices. Currently,
+        the other option is `VectorLoop`, which uses a loop over the antenna pairs,
+        computing the sum over sources as a vector dot product, which can be faster for
+        large arrays where `antpairs` is small (possibly from high redundancy). You
+        should run a performance test before changing this. If not CPU/GPU prefix is
+        specified, it will be added automatically based on the value of `use_gpu`.
 
     Returns
     -------
@@ -121,12 +153,10 @@ def simulate_vis(
         attrs = device.attributes
         attrs = {str(k): v for k, v in attrs.items()}
         string = "\n\t".join(f"{k}: {v}" for k, v in attrs.items())
-        logger.debug(
-            f"""
+        logger.debug(f"""
             Your GPU has the following attributes:
             \t{string}
-            """
-        )
+            """)
 
     fnc = gpu.simulate if use_gpu else cpu.simulate
 
@@ -168,6 +198,9 @@ def simulate_vis(
     else:
         vis = np.zeros((freqs.size, times.size, npairs), dtype=complex_dtype)
 
+    if matprod_method in ["MatMul", "VectorLoop"]:
+        matprod_method = f"GPU{matprod_method}" if use_gpu else f"CPU{matprod_method}"
+
     # Loop over frequencies and call matvis_cpu/gpu
     for i, freq in enumerate(freqs):
         stokes_i = stokes[:, :, i] if stokes is not None else None
@@ -187,6 +220,9 @@ def simulate_vis(
             source_buffer=source_buffer,
             stokes=stokes_i,
             raise_on_negative_flux=raise_on_negative_flux,
+            matprod_method=matprod_method,
+            coord_method=coord_method,
+            coord_method_params=coord_method_params,
             **backend_kwargs,
         )
     return vis
